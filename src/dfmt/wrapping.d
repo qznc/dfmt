@@ -9,6 +9,8 @@ import std.d.lexer;
 import dfmt.tokens;
 import dfmt.config;
 
+/** Represents one point in our search space,
+  * from which we can branch into multiple line breaking possibilities */
 struct State
 {
     this(uint breaks, const Token[] tokens, immutable short[] depths,
@@ -24,10 +26,9 @@ struct State
         this.breaks = breaks;
         this._cost = 0;
         this._solved = true;
-        int ll = currentLineLength;
 
         if (breaks == 0)
-        {
+        { /* no line break, so only one line */
             immutable int l = currentLineLength + tokens.map!(a => tokenLength(a)).sum();
             if (l > config.dfmt_soft_max_line_length)
             {
@@ -39,7 +40,8 @@ struct State
                 this._solved = true;
         }
         else
-        {
+        { /* at least one line break, so multiple lines */
+            /* add penalty for line breaks times parens nesting depth */
             for (size_t i = 0; i != uint.sizeof * 8; ++i)
             {
                 if (((1 << i) & breaks) == 0)
@@ -50,7 +52,9 @@ struct State
                 this._cost += bc;
             }
 
+            /* add penalty for each line according to length */
             size_t i = 0;
+            int ll = currentLineLength;
             foreach (_; 0 .. uint.sizeof * 8)
             {
                 immutable uint k = breaks >>> i;
@@ -91,13 +95,18 @@ struct State
     {
         import core.bitop : bsf, popcnt;
 
-        if (_cost < other._cost || (_cost == other._cost && ((breaks != 0
-                && other.breaks != 0 && bsf(breaks) > bsf(other.breaks))
-                || (_solved && !other.solved))))
-        {
-            return -1;
+        /* First compare by cost */
+        if (_cost < other._cost) return -1;
+        if (_cost > other._cost) return  1;
+        /* Second prefer solved */
+        if (_solved && !other.solved) return -1;
+        if (!_solved && other.solved) return  1;
+        /* Third prefer later line breaks */
+        if (breaks != 0 && other.breaks != 0) {
+            if (bsf(breaks) > bsf(other.breaks)) return -1;
+            if (bsf(breaks) < bsf(other.breaks)) return  1;
         }
-        return other._cost > _cost;
+        return 0;
     }
 
     bool opEquals(ref const State other) const pure nothrow @safe
@@ -115,17 +124,23 @@ struct State
 private:
     int _cost;
     bool _solved;
+
+    invariant {
+        assert (_cost >= 0);
+    }
 }
 
 size_t[] chooseLineBreakTokens(size_t index, const Token[] tokens,
     immutable short[] depths, const Config* config, int currentLineLength, int indentLevel)
 {
+    /* We do an A* search for lowest cost line breaking possibility. */
     import std.container.rbtree : RedBlackTree;
     import std.algorithm : filter, min;
     import core.bitop : popcnt;
 
     static size_t[] genRetVal(uint breaks, size_t index) pure nothrow @safe
     {
+        /* convert bitmask into array of indices */
         auto retVal = new size_t[](popcnt(breaks));
         size_t j = 0;
         foreach (uint i; 0 .. uint.sizeof * 8)
@@ -136,7 +151,9 @@ size_t[] chooseLineBreakTokens(size_t index, const Token[] tokens,
 
     enum ALGORITHMIC_COMPLEXITY_SUCKS = uint.sizeof * 8;
     immutable size_t tokensEnd = min(tokens.length, ALGORITHMIC_COMPLEXITY_SUCKS);
+    /** Priority queue to select the currently lowest state */
     auto open = new RedBlackTree!State;
+    /* Seed with a start state */
     open.insert(State(0, tokens[0 .. tokensEnd], depths[0 .. tokensEnd], config,
         currentLineLength, indentLevel));
     State lowest;
@@ -148,13 +165,17 @@ size_t[] chooseLineBreakTokens(size_t index, const Token[] tokens,
         open.removeFront();
         if (current.solved)
         {
+            /* Currently lowest state is a valid solution. Search finished. */
             return genRetVal(current.breaks, index);
         }
+        /* Insert every valid line breaking at this point */
         validMoves!(typeof(open))(open, tokens[0 .. tokensEnd],
             depths[0 .. tokensEnd], current.breaks, config, currentLineLength, indentLevel);
     }
+    /* We somehow tried everything without finding a solution */
     if (open.empty)
         return genRetVal(lowest.breaks, index);
+    // how can we end up here??
     foreach (r; open[].filter!(a => a.solved))
         return genRetVal(r.breaks, index);
     assert(false);
@@ -171,6 +192,8 @@ void validMoves(OR)(auto ref OR output, const Token[] tokens,
     {
         if (!isBreakToken(token.type) || (((1 << i) & current) != 0))
             continue;
+        /* We could insert an additional line break here,
+         * so enqueue that possibility. */
         immutable uint breaks = current | (1 << i);
         output.insert(State(breaks, tokens, depths, config, currentLineLength, indentLevel));
     }
