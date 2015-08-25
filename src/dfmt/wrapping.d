@@ -91,13 +91,18 @@ struct State
     {
         import core.bitop : bsf, popcnt;
 
-        if (_cost < other._cost || (_cost == other._cost && ((breaks != 0
-                && other.breaks != 0 && bsf(breaks) > bsf(other.breaks))
-                || (_solved && !other.solved))))
-        {
-            return -1;
+        // third, solved is better
+        if (_solved && !other.solved) return  1;
+        if (!_solved && other.solved) return -1;
+        // first, lower cost is better
+        if (_cost < other._cost) return -1;
+        if (_cost > other._cost) return  1;
+        // second, later breaks are better
+        if (breaks != 0 && other.breaks != 0) {
+            if (bsf(breaks) > bsf(other.breaks)) return -1;
+            if (bsf(breaks) < bsf(other.breaks)) return  1;
         }
-        return other._cost > _cost;
+        return 0;
     }
 
     bool opEquals(ref const State other) const pure nothrow @safe
