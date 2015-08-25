@@ -5,6 +5,8 @@
 
 module dfmt.wrapping;
 
+import std.stdio: writeln;
+
 import std.d.lexer;
 import dfmt.tokens;
 import dfmt.config;
@@ -12,7 +14,7 @@ import dfmt.config;
 struct State
 {
     this(uint breaks, const Token[] tokens, immutable short[] depths,
-        const Config* config, int currentLineLength, int indentLevel) pure @safe
+        const Config* config, int currentLineLength, int indentLevel)
     {
         import std.math : abs;
         import core.bitop : popcnt, bsf;
@@ -25,6 +27,7 @@ struct State
         this._cost = 0;
         this._solved = true;
         int ll = currentLineLength;
+        //writeln("--------------- ll=",ll);
 
         if (breaks == 0)
         {
@@ -32,11 +35,13 @@ struct State
             if (l > config.dfmt_soft_max_line_length)
             {
                 immutable int longPenalty = (l - config.dfmt_soft_max_line_length) * remainingCharsMultiplier;
+                //writeln("longPenalty = ",longPenalty);
                 this._cost += longPenalty;
                 this._solved = longPenalty < newlinePenalty;
             }
             else
                 this._solved = true;
+            //writeln("no line break, cost==",_cost);
         }
         else
         {
@@ -49,6 +54,7 @@ struct State
                 immutable bc = breakCost(b) * (p == 0 ? 1 : p * 2);
                 this._cost += bc;
             }
+            //writeln("breakCost = ",_cost);
 
             size_t i = 0;
             foreach (_; 0 .. uint.sizeof * 8)
@@ -62,6 +68,7 @@ struct State
                 {
                     immutable int longPenalty = (ll - config.dfmt_soft_max_line_length) * remainingCharsMultiplier;
                     this._cost += longPenalty;
+                    //writeln("longPenalty += ",longPenalty);
                 }
                 if (ll > config.max_line_length)
                 {
@@ -75,6 +82,7 @@ struct State
             }
         }
         this._cost += popcnt(breaks) * newlinePenalty;
+        //writeln("break, cost==",_cost);
     }
 
     int cost() const pure nothrow @safe @property
@@ -94,14 +102,14 @@ struct State
         // third, solved is better
         if (_solved && !other.solved) return  1;
         if (!_solved && other.solved) return -1;
-        // first, lower cost is better
-        if (_cost < other._cost) return -1;
-        if (_cost > other._cost) return  1;
         // second, later breaks are better
         if (breaks != 0 && other.breaks != 0) {
             if (bsf(breaks) > bsf(other.breaks)) return -1;
             if (bsf(breaks) < bsf(other.breaks)) return  1;
         }
+        // first, lower cost is better
+        if (_cost < other._cost) return -1;
+        if (_cost > other._cost) return  1;
         return 0;
     }
 
@@ -148,6 +156,7 @@ size_t[] chooseLineBreakTokens(size_t index, const Token[] tokens,
     while (!open.empty)
     {
         State current = open.front();
+        writeln("current: cost==",current.cost);
         if (current.cost < lowest.cost)
             lowest = current;
         open.removeFront();
